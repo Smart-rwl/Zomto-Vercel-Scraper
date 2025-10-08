@@ -2,72 +2,48 @@ const puppeteer = require('puppeteer-core');
 const chrome = require('@sparticuz/chromium');
 
 // This line is for Vercel's Pro plan. It allows the function to run longer.
-// On the free Hobby plan, the limit is still around 10-15 seconds.
+// On the free Hobby plan, the timeout is typically 10-15 seconds regardless.
 export const maxDuration = 60;
 
-// This function is executed in the browser to perform intelligent, observer-based scraping
-const scrapeWithObserver = () => {
-    return new Promise((resolve, reject) => {
+// This function scrolls, waits, and scrapes until no new content is loaded.
+// It's a more reliable method for handling infinite scroll.
+const scrapeInfiniteScroll = () => {
+    return new Promise((resolve) => {
         const followerLinks = new Set();
-        const maxIdleTime = 5000; // 5 seconds
-        let idleTimer = setTimeout(() => {
-            // If no new content is loaded for 5 seconds, we assume we're done
-            observer.disconnect();
-            resolve(Array.from(followerLinks));
-        }, maxIdleTime);
-
-        const observer = new MutationObserver((mutations) => {
-            // Reset the idle timer because new content has just been loaded
-            clearTimeout(idleTimer);
-
-            // Scrape for new links that were just added
-            mutations.forEach(mutation => {
-                mutation.addedNodes.forEach(node => {
-                    if (node.nodeType === 1) { // It's an element
-                        const links = node.querySelectorAll('a[href*="/users/"]');
-                        links.forEach(el => {
-                            if (el.href) {
-                                const cleanUrl = el.href.split('?')[0];
-                                followerLinks.add(cleanUrl);
-                            }
-                        });
-                    }
-                });
-            });
-            
-            // Set the timer again to wait for the next batch of content
-            idleTimer = setTimeout(() => {
-                observer.disconnect();
-                resolve(Array.from(followerLinks));
-            }, maxIdleTime);
-        });
-
-        // Find the main container where followers are loaded. This might need adjustment.
-        // We'll start by observing the whole body.
-        const targetNode = document.body;
-        if (!targetNode) {
-            return reject('Could not find target node to observe.');
-        }
-
-        // Start observing for changes (i.e., new followers being loaded)
-        observer.observe(targetNode, { childList: true, subtree: true });
-
-        // Start the scrolling process
         let lastHeight = 0;
-        const scrollInterval = setInterval(() => {
+        let stableCount = 0; // Counter to check if the page has stopped loading new content
+        const maxStableCount = 4; // Stop after 4 scrolls with no new followers
+
+        const interval = setInterval(() => {
+            // Scrape all links currently visible on the page
+            document.querySelectorAll('a[href*="/users/"]').forEach(el => {
+                if (el.href) {
+                    const cleanUrl = el.href.split('?')[0];
+                    followerLinks.add(cleanUrl);
+                }
+            });
+
             const currentHeight = document.documentElement.scrollHeight;
             if (currentHeight > lastHeight) {
-                lastHeight = currentHeight;
                 window.scrollTo(0, currentHeight);
+                lastHeight = currentHeight;
+                stableCount = 0; // Reset counter because new content was loaded
+            } else {
+                stableCount++; // Increment counter if height is the same
             }
-        }, 500); // Scroll down every half a second
-        
-        // Also add a safety timeout for the whole process
+
+            // If we've scrolled and the height hasn't changed for a few cycles, we're done.
+            if (stableCount >= maxStableCount) {
+                clearInterval(interval);
+                resolve(Array.from(followerLinks));
+            }
+        }, 1000); // Scroll every 1 second to give content time to load
+
+        // A final safety timeout to ensure the function completes
         setTimeout(() => {
-             clearInterval(scrollInterval);
-             observer.disconnect();
-             resolve(Array.from(followerLinks));
-        }, 25000); // Max 25 seconds for the whole process
+            clearInterval(interval);
+            resolve(Array.from(followerLinks));
+        }, 45000); // Max 45 seconds for the entire process
     });
 };
 
@@ -82,6 +58,7 @@ export default async function handler(request, response) {
   let browser = null;
   
   try {
+    console.log('Serverless function started. Launching browser...');
     browser = await puppeteer.launch({
       args: chrome.args,
       defaultViewport: chrome.defaultViewport,
@@ -91,6 +68,8 @@ export default async function handler(request, response) {
     });
     
     const page = await browser.newPage();
+    // Set a realistic user agent to avoid being blocked
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
     await page.setRequestInterception(true);
@@ -103,25 +82,28 @@ export default async function handler(request, response) {
     });
     
     const networkUrl = url.endsWith('/network') ? url : `${url.split('?')[0]}/network`;
+    console.log(`Navigating to: ${networkUrl}`);
     await page.goto(networkUrl, { waitUntil: 'domcontentloaded' });
     
-    // Wait for the initial set of followers to load
-    await page.waitForSelector('a[href*="/users/"]', { timeout: 15000 });
+    console.log('Waiting for initial follower links to appear...');
+    await page.waitForSelector('a[href*="/users/"]', { timeout: 20000 });
 
-    // Execute the advanced observer-based scraping logic
-    const allFollowers = await page.evaluate(scrapeWithObserver);
+    console.log('Initial content loaded. Starting infinite scroll scrape...');
+    const allFollowers = await page.evaluate(scrapeInfiniteScroll);
+    console.log(`Scraping complete. Found ${allFollowers.length} total links.`);
     
-    // Filter out the original profile URL from the results
     const originalProfileUrl = url.split('?')[0];
     const filteredFollowers = allFollowers.filter(link => !link.includes(originalProfileUrl));
+    console.log(`Returning ${filteredFollowers.length} unique follower links.`);
 
     return response.status(200).json({ followers: filteredFollowers });
 
   } catch (error) {
-    console.error('Error during scraping:', error);
-    return response.status(500).json({ error: 'Failed to scrape the page. The profile might be private or Zomato changed their layout.', details: error.message });
+    console.error('CRITICAL ERROR during scraping:', error);
+    return response.status(500).json({ error: 'Failed to scrape the page. This could be due to a timeout, a private profile, or a change in Zomato\'s website structure.', details: error.message });
   } finally {
     if (browser !== null) {
+      console.log('Closing browser.');
       await browser.close();
     }
   }
