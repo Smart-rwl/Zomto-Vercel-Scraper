@@ -1,3 +1,4 @@
+```javascript:Zomato Scraper Backend:api/scrape.js
 const puppeteer = require('puppeteer-core');
 const chrome = require('@sparticuz/chromium');
 
@@ -30,19 +31,18 @@ export default async function handler(request, response) {
     await page.goto(networkUrl, { waitUntil: 'networkidle2' });
 
     // This is the core scraping logic. It tells the browser:
-    // "Find all the links that are inside an element with the class 'sc-1l2s06c-1'"
+    // "Find all the links that have a specific class name Zomato uses for profiles"
     // NOTE: This class name might be changed by Zomato in the future, which would break the scraper.
     const followerLinks = await page.evaluate(() => {
-        const links = [];
-        // Zomato's structure for follower links
+        const links = new Set(); // Use a Set to automatically handle duplicates
+        // Zomato's structure for follower links. This class is on the <a> tag.
         const linkElements = document.querySelectorAll('a.sc-1l2s06c-1'); 
         linkElements.forEach(el => {
             if (el.href) {
-                links.push(el.href);
+                links.add(el.href);
             }
         });
-        // Using a Set to get only unique links
-        return [...new Set(links)]; 
+        return Array.from(links); 
     });
 
     // Send the scraped links back to the frontend
