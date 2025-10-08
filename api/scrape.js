@@ -1,6 +1,42 @@
 const puppeteer = require('puppeteer-core');
 const chrome = require('@sparticuz/chromium');
 
+// This function will be executed in the browser's context to perform the scraping
+const scrapeInBrowser = async () => {
+    const followerLinks = new Set();
+    let lastHeight = 0;
+    let loops = 0;
+
+    return new Promise((resolve) => {
+        const interval = setInterval(() => {
+            const scrollableElement = document.documentElement; // Or a more specific scrollable div
+            const currentHeight = scrollableElement.scrollHeight;
+
+            // Scrape links currently on the page
+            const linkElements = document.querySelectorAll('a.sc-1l2s06c-1');
+            linkElements.forEach(el => {
+                if (el.href) {
+                    followerLinks.add(el.href);
+                }
+            });
+
+            // If we haven't scrolled, or we've tried a few times without change, stop.
+            if (currentHeight === lastHeight && loops > 3) {
+                clearInterval(interval);
+                resolve(Array.from(followerLinks));
+            } else {
+                 if (currentHeight === lastHeight) {
+                    loops++;
+                 } else {
+                    loops = 0; // Reset loop counter if we see new content
+                 }
+                lastHeight = currentHeight;
+                window.scrollTo(0, currentHeight);
+            }
+        }, 1000); // Scroll every 1 second
+    });
+};
+
 export default async function handler(request, response) {
   const { url } = request.query;
 
@@ -20,48 +56,35 @@ export default async function handler(request, response) {
     });
     
     const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
 
-    // --- OPTIMIZATION START ---
-    // Intercept network requests
     await page.setRequestInterception(true);
     page.on('request', (req) => {
-      // Block requests for images, fonts, and stylesheets to speed up loading
-      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
         req.abort();
       } else {
         req.continue();
       }
     });
-    // --- OPTIMIZATION END ---
     
     const networkUrl = url.endsWith('/network') ? url : `${url.split('?')[0]}/network`;
-    // Use 'domcontentloaded' which is faster than 'networkidle2'
     await page.goto(networkUrl, { waitUntil: 'domcontentloaded' });
+    
+    // Wait for the initial set of followers to load
+    await page.waitForSelector('a.sc-1l2s06c-1', { timeout: 15000 });
 
-    // Wait for the specific element we need to appear on the page.
-    // This is more reliable than waiting for the whole network to be idle.
-    await page.waitForSelector('a.sc-1l2s06c-1', { timeout: 10000 }); // Wait up to 10 seconds
+    // Execute the advanced scrolling and scraping logic
+    const allFollowers = await page.evaluate(scrapeInBrowser);
 
-    const followerLinks = await page.evaluate(() => {
-        const links = new Set();
-        const linkElements = document.querySelectorAll('a.sc-1l2s06c-1'); 
-        linkElements.forEach(el => {
-            if (el.href) {
-                links.add(el.href);
-            }
-        });
-        return Array.from(links); 
-    });
-
-    return response.status(200).json({ followers: followerLinks });
+    return response.status(200).json({ followers: allFollowers });
 
   } catch (error) {
     console.error(error);
-    // Send a proper JSON error back to the frontend
-    return response.status(500).json({ error: 'Failed to scrape the page.', details: error.message });
+    return response.status(500).json({ error: 'Failed to scrape the page. The profile might be private or Zomato changed their layout.', details: error.message });
   } finally {
     if (browser !== null) {
       await browser.close();
     }
   }
 }
+
