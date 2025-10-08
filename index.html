@@ -3,16 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zomato Follower Link Scraper</title>
+    <title>Zomato Follower Scraper</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Dark gray background */
         }
         .spinner {
-            border-top-color: #3498db;
+            border-top-color: transparent;
             animation: spin 1s linear infinite;
         }
         @keyframes spin {
@@ -20,16 +23,14 @@
         }
     </style>
 </head>
-<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+<body class="text-white flex items-center justify-center min-h-screen p-4">
 
-    <div class="w-full max-w-2xl mx-auto p-6 md:p-8 bg-gray-800 rounded-2xl shadow-2xl">
-        
-        <div class="text-center mb-8">
-            <h1 class="text-3xl font-bold text-white">Zomato Follower Scraper</h1>
-            <p class="text-gray-400 mt-2">Paste a profile URL to get a list of their followers' profiles.</p>
+    <div class="w-full max-w-2xl bg-gray-800 rounded-xl shadow-2xl p-6 sm:p-8 space-y-6 border border-gray-700">
+        <div class="text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold text-white">Zomato Follower Scraper</h1>
+            <p class="text-gray-400 mt-2">Enter a Zomato user profile URL to get their follower links.</p>
         </div>
 
-        <!-- Input Section -->
         <div class="space-y-4">
             <div>
                 <label for="zomato-url" class="block text-sm font-medium text-gray-300 mb-2">Zomato Profile URL</label>
@@ -41,22 +42,17 @@
                     </button>
                 </div>
             </div>
-        </div>
-        
-        <!-- Status/Result Section -->
-        <div id="status-container" class="mt-6 text-center h-6"></div>
-
-        <div id="results-container" class="hidden mt-4">
-            <div class="flex justify-between items-center mb-2">
-                <label for="follower-links" class="text-sm font-medium text-gray-300">Scraped Follower Links</label>
-                <button id="copy-btn" class="bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-2 px-4 rounded-lg transition duration-200 text-sm flex items-center">
-                    <i class="fas fa-copy mr-2"></i>
-                    <span id="copy-text">Copy All</span>
-                </button>
-            </div>
-            <textarea id="follower-links" readonly class="w-full h-64 bg-gray-900 text-gray-300 border border-gray-700 rounded-lg p-4 focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"></textarea>
+            <div id="status-container" class="text-center min-h-[20px]"></div>
         </div>
 
+        <div id="results-container" class="hidden">
+            <label for="follower-links" class="block text-sm font-medium text-gray-300 mb-2">Scraped Follower Links</label>
+            <textarea id="follower-links" rows="10" class="w-full bg-gray-900 text-gray-300 border-gray-700 rounded-lg p-4 focus:ring-2 focus:ring-blue-500 focus:outline-none" readonly></textarea>
+            <button id="copy-btn" class="mt-4 w-full flex items-center justify-center bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200">
+                <i class="fas fa-copy mr-2"></i>
+                <span id="copy-text">Copy All</span>
+            </button>
+        </div>
     </div>
 
     <script>
@@ -78,92 +74,55 @@
                 return;
             }
 
-            // --- UI state update ---
             setLoading(true);
             resultsContainer.classList.add('hidden');
             followerLinksTextarea.value = '';
 
             try {
-                // IMPORTANT: This is a MOCK function.
-                // In a real Vercel app, you would replace this with:
-                // const response = await fetch(`/api/scrape?url=${encodeURIComponent(url)}`);
-                // if (!response.ok) throw new Error('Scraping failed');
-                // const data = await response.json();
-                // const followers = data.followers;
+                // Call our backend serverless function
+                const response = await fetch(`/api/scrape?url=${encodeURIComponent(url)}`);
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Scraping failed on the server.');
+                }
                 
-                const followers = await mockScrapingFunction(url);
+                const data = await response.json();
+                const followers = data.followers;
                 
-                if (followers.length > 0) {
+                if (followers && followers.length > 0) {
                     followerLinksTextarea.value = followers.join('\n');
                     resultsContainer.classList.remove('hidden');
                     showStatus(`Successfully scraped ${followers.length} follower links.`, 'success');
                 } else {
-                    showStatus('No followers found or the profile is private.', 'warning');
+                    showStatus('No followers found. The profile might be private or have no followers.', 'warning');
                 }
 
             } catch (error) {
                 console.error('Scraping error:', error);
-                // This error will trigger if your Vercel function fails.
-                showStatus('Failed to scrape followers. The profile might be private or Zomato blocked the request.', 'error');
+                showStatus(error.message, 'error');
             } finally {
                 setLoading(false);
             }
         }
-        
-        /**
-         * MOCK SCRAPING FUNCTION - Simulates a real backend call.
-         * In your Vercel project, you would create a file at `/api/scrape.js`
-         * to handle the scraping logic using a library like Puppeteer or Cheerio.
-         * This function is just for demonstration purposes.
-         */
-        function mockScrapingFunction(url) {
-            console.log(`Simulating scraping for: ${url}`);
-            return new Promise(resolve => {
-                setTimeout(() => {
-                    // This is placeholder data for demonstration.
-                    // A real backend would scrape the actual followers from the provided URL.
-                    const mockData = [
-                        'https://www.zomato.com/users/foodie-delhi-12345',
-                        'https://www.zomato.com/users/mumbai-eats-67890',
-                        'https://www.zomato.com/users/bangalore-blogger-54321',
-                        'https://www.zomato.com/users/chennai-food-lover-98765',
-                        'https://www.zomato.com/users/kolkata-explorer-24680',
-                        'https://www.zomato.com/users/hyderabad-hunger-13579',
-                        'https://www.zomato.com/users/pune-bites-11223',
-                        'https://www.zomato.com/users/jaipur-foodie-44556',
-                        'https://www.zomato.com/users/goa-grills-55667',
-                        'https://www.zomato.com/users/ahmedabad-eats-77889',
-                        'https://www.zomato.com/users/surat-snacks-10101'
-                    ];
-                    resolve(mockData);
-                }, 2000); // Simulate network delay
-            });
-        }
 
         function copyToClipboard() {
             if (!followerLinksTextarea.value) return;
-
-            // Using document.execCommand for better compatibility inside iFrames
             followerLinksTextarea.select();
-            followerLinksTextarea.setSelectionRange(0, 99999); // For mobile devices
+            followerLinksTextarea.setSelectionRange(0, 99999);
             try {
                 document.execCommand('copy');
                 copyText.textContent = 'Copied!';
-                setTimeout(() => {
-                    copyText.textContent = 'Copy All';
-                }, 2000);
+                setTimeout(() => { copyText.textContent = 'Copy All'; }, 2000);
             } catch (err) {
                 console.error('Failed to copy: ', err);
                 copyText.textContent = 'Failed!';
-                 setTimeout(() => {
-                    copyText.textContent = 'Copy All';
-                }, 2000);
+                setTimeout(() => { copyText.textContent = 'Copy All'; }, 2000);
             }
             window.getSelection().removeAllRanges();
         }
 
         function isValidZomatoUrl(url) {
-            // Basic validation - you can make this more robust
             try {
                 const urlObject = new URL(url);
                 return urlObject.hostname.includes('zomato.com') && urlObject.pathname.includes('/users/');
@@ -190,10 +149,7 @@
             if (type === 'warning') colorClass = 'text-yellow-400';
             statusContainer.innerHTML = `<p class="${colorClass} transition-opacity duration-300">${message}</p>`;
         }
-
     </script>
-
 </body>
 </html>
-
 
