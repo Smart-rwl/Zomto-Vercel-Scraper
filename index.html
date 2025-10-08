@@ -12,7 +12,7 @@
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #111827; /* Dark gray background */
+            background-color: #111827;
         }
         .spinner {
             border-top-color: transparent;
@@ -79,13 +79,21 @@
             followerLinksTextarea.value = '';
 
             try {
-                // Call our backend serverless function
                 const response = await fetch(`/api/scrape?url=${encodeURIComponent(url)}`);
 
+                // --- ROBUST ERROR HANDLING START ---
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || 'Scraping failed on the server.');
+                    // Try to parse the error as JSON, but have a fallback.
+                    let errorMsg = `Server error: ${response.status} ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = errorData.error || JSON.stringify(errorData);
+                    } catch (e) {
+                        // The error response wasn't JSON, just use the status text.
+                    }
+                    throw new Error(errorMsg);
                 }
+                // --- ROBUST ERROR HANDLING END ---
                 
                 const data = await response.json();
                 const followers = data.followers;
@@ -116,8 +124,6 @@
                 setTimeout(() => { copyText.textContent = 'Copy All'; }, 2000);
             } catch (err) {
                 console.error('Failed to copy: ', err);
-                copyText.textContent = 'Failed!';
-                setTimeout(() => { copyText.textContent = 'Copy All'; }, 2000);
             }
             window.getSelection().removeAllRanges();
         }
@@ -152,3 +158,4 @@
     </script>
 </body>
 </html>
+
