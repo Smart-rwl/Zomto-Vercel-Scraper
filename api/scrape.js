@@ -1,27 +1,36 @@
 const puppeteer = require('puppeteer-core');
 const chrome = require('@sparticuz/chromium');
 
+// This line is for Vercel's Pro plan. It allows the function to run longer.
+// On the free Hobby plan, the limit is still around 10-15 seconds.
+export const maxDuration = 60; 
+
 // This function will be executed in the browser's context to perform the scraping
 const scrapeInBrowser = async () => {
     const followerLinks = new Set();
     let lastHeight = 0;
     let loops = 0;
+    const maxLoopsWithoutChange = 5; // Stop after 5 loops with no new content
 
     return new Promise((resolve) => {
         const interval = setInterval(() => {
-            const scrollableElement = document.documentElement; // Or a more specific scrollable div
+            const scrollableElement = document.documentElement;
             const currentHeight = scrollableElement.scrollHeight;
 
-            // Scrape links currently on the page
-            const linkElements = document.querySelectorAll('a.sc-1l2s06c-1');
+            // --- IMPROVED SELECTOR ---
+            // Instead of a fragile class name, we look for any link containing '/users/'
+            // This is much more reliable.
+            const linkElements = document.querySelectorAll('a[href*="/users/"]');
             linkElements.forEach(el => {
                 if (el.href) {
-                    followerLinks.add(el.href);
+                    // We clean the URL to remove any tracking parameters
+                    const cleanUrl = el.href.split('?')[0];
+                    followerLinks.add(cleanUrl);
                 }
             });
 
-            // If we haven't scrolled, or we've tried a few times without change, stop.
-            if (currentHeight === lastHeight && loops > 3) {
+            // If we've stopped finding new content, end the process.
+            if (currentHeight === lastHeight && loops > maxLoopsWithoutChange) {
                 clearInterval(interval);
                 resolve(Array.from(followerLinks));
             } else {
@@ -33,7 +42,7 @@ const scrapeInBrowser = async () => {
                 lastHeight = currentHeight;
                 window.scrollTo(0, currentHeight);
             }
-        }, 1000); // Scroll every 1 second
+        }, 750); // Scroll every 0.75 seconds (slightly faster)
     });
 };
 
@@ -70,13 +79,18 @@ export default async function handler(request, response) {
     const networkUrl = url.endsWith('/network') ? url : `${url.split('?')[0]}/network`;
     await page.goto(networkUrl, { waitUntil: 'domcontentloaded' });
     
-    // Wait for the initial set of followers to load
-    await page.waitForSelector('a.sc-1l2s06c-1', { timeout: 15000 });
+    // Wait for the initial set of followers to load using the new, reliable selector
+    await page.waitForSelector('a[href*="/users/"]', { timeout: 15000 });
 
     // Execute the advanced scrolling and scraping logic
     const allFollowers = await page.evaluate(scrapeInBrowser);
+    
+    // Filter out the original profile URL from the results, if present
+    const originalProfileUrl = url.split('?')[0];
+    const filteredFollowers = allFollowers.filter(link => !link.includes(originalProfileUrl));
 
-    return response.status(200).json({ followers: allFollowers });
+
+    return response.status(200).json({ followers: filteredFollowers });
 
   } catch (error) {
     console.error(error);
